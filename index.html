@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>お散歩アプリ プロトタイプ</title>
+    <!-- Tailwind CSS CDNを読み込み -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Leaflet CSSを読み込み -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+    <style>
+        /* Interフォントを読み込み（Tailwindのデフォルトだが明示的に） */
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f0f8ff; /* 淡い青の背景 */
+        }
+        /* カスタムスタイル */
+        #map {
+            /* Leaflet地図が表示される場所 */
+            /* Tailwindのh-64 (256px) / sm:h-80 (320px) に合わせて固定高さを設定 */
+            height: 320px; /* ここで固定の高さを指定！ */
+            width: 100%; /* w-full と同じ */
+            border-radius: 1rem; /* rounded-xl と同じ */
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06); /* shadow-md と同じ */
+            background-color: #e0e0e0; /* 地図読み込み中の背景色 */
+            display: block; /* ブロック要素として確実に高さを確保 */
+        }
+        .scroll-container {
+            max-height: 150px; /* 案内のスクロールエリアの高さ制限 */
+            overflow-y: auto;
+            -webkit-overflow-scrolling: touch; /* iOSでのスムーズなスクロール */
+        }
+        /* カスタムスクロールバー（任意） */
+        .scroll-container::-webkit-scrollbar {
+            width: 8px;
+        }
+        .scroll-container::-webkit-scrollbar-track {
+            background: #f1f1f1;
+            border-radius: 10px;
+        }
+        .scroll-container::-webkit-scrollbar-thumb {
+            background: #888;
+            border-radius: 10px;
+        }
+        .scroll-container::-webkit-scrollbar-thumb:hover {
+            background: #555;
+        }
+    </style>
+</head>
+<body class="flex flex-col items-center min-h-screen p-4 sm:p-6 bg-gradient-to-br from-blue-100 to-purple-100">
+
+    <!-- ヘッダー -->
+    <header class="w-full max-w-2xl bg-gradient-to-r from-purple-500 to-pink-500 text-white p-5 rounded-xl shadow-lg mb-6 text-center">
+        <h1 class="text-3xl sm:text-4xl font-extrabold tracking-tight">
+            お散歩アプリ プロトタイプ 🚶‍♀️✨
+        </h1>
+        <p class="mt-2 text-lg sm:text-xl font-medium">
+            歩きたい距離を入力して、新しいルートを見つけよう！
+        </p>
+    </header>
+
+    <!-- メインコンテンツ -->
+    <main class="w-full max-w-2xl bg-white p-6 rounded-xl shadow-xl space-y-6">
+
+        <!-- 距離入力とボタン -->
+        <section class="flex flex-col sm:flex-row items-center justify-center gap-4">
+            <input
+                type="number"
+                id="distanceInput"
+                placeholder="歩きたい距離 (km) を入力してね！"
+                class="flex-grow w-full sm:w-auto p-3 border-2 border-blue-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-lg text-gray-700 placeholder-gray-400 font-medium"
+                min="0.1"
+                step="0.1"
+            >
+            <button
+                id="generateRouteButton"
+                class="w-full sm:w-auto bg-gradient-to-r from-green-400 to-blue-500 text-white font-bold py-3 px-6 rounded-full shadow-lg hover:from-green-500 hover:to-blue-600 transition duration-300 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-green-300"
+            >
+                ルートを生成する！🗺️
+            </button>
+        </section>
+
+        <!-- 地図表示エリア -->
+        <section class="relative w-full rounded-xl shadow-md overflow-hidden bg-gray-200 flex items-center justify-center">
+            <div id="map" class="w-full"></div>
+            <!-- 地図読み込み中のオーバーレイ -->
+            <div id="mapLoading" class="absolute inset-0 flex items-center justify-center bg-gray-200 bg-opacity-75 text-gray-600 font-bold text-xl z-10">
+                地図を読み込み中... 🌍
+            </div>
+        </section>
+
+        <!-- 音声案内と案内表示 -->
+        <section class="bg-white p-5 rounded-xl shadow-md border border-gray-200">
+            <h2 class="text-2xl font-bold text-gray-800 mb-4 text-center">
+                音声案内 🗣️
+            </h2>
+            <div id="guidanceDisplay" class="scroll-container bg-blue-50 p-4 rounded-lg border border-blue-200 text-gray-700 text-base leading-relaxed mb-4">
+                <p class="text-center text-gray-500">ルートを生成すると、ここに案内が表示されるよ！</p>
+            </div>
+            <div class="flex flex-col sm:flex-row justify-center gap-4">
+                <button
+                    id="startGuidanceButton"
+                    class="w-full sm:w-auto bg-gradient-to-r from-orange-400 to-red-500 text-white font-bold py-3 px-6 rounded-full shadow-lg hover:from-orange-500 hover:to-red-600 transition duration-300 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-orange-300"
+                    disabled
+                >
+                    お散歩スタート！▶️
+                </button>
+                <button
+                    id="nextGuidanceButton"
+                    class="w-full sm:w-auto bg-gradient-to-r from-purple-400 to-indigo-500 text-white font-bold py-3 px-6 rounded-full shadow-lg hover:from-purple-500 hover:to-indigo-600 transition duration-300 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-purple-300"
+                    disabled
+                >
+                    次の案内へ！👉
+                </button>
+            </div>
+        </section>
+
+        <!-- メッセージボックス -->
+        <div id="messageBox" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
+            <div class="bg-white p-8 rounded-xl shadow-2xl text-center max-w-sm mx-4">
+                <p id="messageText" class="text-xl font-semibold text-gray-800 mb-6"></p>
+                <button id="closeMessageBox" class="bg-blue-500 text-white font-bold py-3 px-6 rounded-full hover:bg-blue-600 transition duration-200">OK！</button>
+            </div>
+        </div>
+
+    </main>
+
+    <!-- Leaflet JavaScriptを読み込み -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+    <script>
+        // DOM要素の取得
+        const distanceInput = document.getElementById('distanceInput');
+        const generateRouteButton = document.getElementById('generateRouteButton');
+        const guidanceDisplay = document.getElementById('guidanceDisplay');
+        const startGuidanceButton = document.getElementById('startGuidanceButton');
+        const nextGuidanceButton = document.getElementById('nextGuidanceButton');
+        const messageBox = document.getElementById('messageBox');
+        const messageText = document.getElementById('messageText');
+        const closeMessageBox = document.getElementById('closeMessageBox');
+        const mapLoading = document.getElementById('mapLoading'); // 新しく追加
+
+        let currentRouteGuidance = []; // 生成されたルート案内テキストの配列
+        let currentGuidanceIndex = 0; // 現在の案内インデックス
+
+        let map; // Leafletマップインスタンスを保持する変数
+        let currentMarker; // 現在地マーカーを保持する変数
+
+        // メッセージボックスを表示する関数
+        function showMessageBox(message) {
+            messageText.textContent = message;
+            messageBox.classList.remove('hidden');
+        }
+
+        // メッセージボックスを閉じるイベントリスナー
+        closeMessageBox.addEventListener('click', () => {
+            messageBox.classList.add('hidden');
+        });
+
+        // ルートを生成する関数
+        generateRouteButton.addEventListener('click', () => {
+            const distance = parseFloat(distanceInput.value);
+
+            if (isNaN(distance) || distance <= 0) {
+                showMessageBox('有効な歩行距離（数字）を入力してね！');
+                return;
+            }
+
+            // プロトタイプのため、ダミーのルート案内を生成
+            currentRouteGuidance = [];
+            currentGuidanceIndex = 0;
+            guidanceDisplay.innerHTML = ''; // 以前の案内をクリア
+
+            // 距離に応じて案内の数を調整（あくまでダミー）
+            // 最大ステップ数の制限を削除し、距離に比例して増えるように変更
+            const numSteps = Math.max(Math.floor(distance * 5), 3); // 最小3ステップ
+
+            currentRouteGuidance.push('お散歩を開始します！良いお天気だね！☀️');
+
+            for (let i = 0; i < numSteps; i++) {
+                const directions = ['右', '左', '直進'];
+                const direction = directions[Math.floor(Math.random() * directions.length)];
+                const meters = Math.floor(Math.random() * 300) + 50; // 50m〜350m
+                currentRouteGuidance.push(`${meters}m先を${direction}に曲がります。`);
+            }
+            currentRouteGuidance.push('ゴールだよ！お散歩お疲れ様でした！🌸');
+
+            // 最初の案内を表示
+            guidanceDisplay.innerHTML = `<p class="font-bold text-blue-700">1. ${currentRouteGuidance[0]}</p>`;
+            showMessageBox(`お散歩ルートを生成したよ！全${currentRouteGuidance.length}ステップだよ！`);
+
+            // ボタンの有効化
+            startGuidanceButton.disabled = false;
+            nextGuidanceButton.disabled = false;
+        });
+
+        // 音声案内を開始する関数
+        startGuidanceButton.addEventListener('click', () => {
+            if (currentRouteGuidance.length === 0) {
+                showMessageBox('まずルートを生成してね！');
+                return;
+            }
+            currentGuidanceIndex = 0; // 最初からスタート
+            speakGuidance(currentRouteGuidance[currentGuidanceIndex]);
+            updateGuidanceDisplay();
+        });
+
+        // 次の案内へ進む関数
+        nextGuidanceButton.addEventListener('click', () => {
+            if (currentGuidanceIndex < currentRouteGuidance.length - 1) {
+                currentGuidanceIndex++;
+                speakGuidance(currentRouteGuidance[currentGuidanceIndex]);
+                updateGuidanceDisplay();
+            } else {
+                showMessageBox('すべての案内が終了したよ！お疲れ様でした！😊');
+                // ボタンを無効化
+                startGuidanceButton.disabled = true;
+                nextGuidanceButton.disabled = true;
+            }
+        });
+
+        // 案内を音声で読み上げる関数
+        function speakGuidance(text) {
+            if ('speechSynthesis' in window) {
+                const utterance = new SpeechSynthesisUtterance(text);
+                utterance.lang = 'ja-JP'; // 日本語を設定
+                window.speechSynthesis.speak(utterance);
+            } else {
+                console.warn('お使いのブラウザは音声合成に対応していません。');
+                showMessageBox('ごめんね、お使いのブラウザは音声合成に対応していないみたい...！');
+            }
+        }
+
+        // 案内表示を更新する関数
+        function updateGuidanceDisplay() {
+            guidanceDisplay.innerHTML = ''; // 全ての案内をクリア
+            currentRouteGuidance.forEach((guidance, index) => {
+                const p = document.createElement('p');
+                p.textContent = `${index + 1}. ${guidance}`;
+                if (index === currentGuidanceIndex) {
+                    p.classList.add('font-bold', 'text-blue-700', 'text-lg'); // 現在の案内を強調
+                }
+                guidanceDisplay.appendChild(p);
+            });
+            // 現在の案内が見えるようにスクロール
+            const currentElement = guidanceDisplay.querySelector('.font-bold');
+            if (currentElement) {
+                currentElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+        }
+
+        // Leafletマップを初期化する関数
+        function initializeMap(latitude, longitude) {
+            console.log('initializeMap called. Type of L:', typeof L); // Debugging line
+            mapLoading.classList.remove('hidden'); // 地図読み込み中表示を出す
+
+            // マップが既に存在する場合は破棄して再作成
+            if (map) {
+                map.remove();
+            }
+            // 地図の中心を現在地（またはデフォルト）に設定し、ズームレベルを指定
+            map = L.map('map').setView([latitude, longitude], 15); // ズームレベル15
+
+            // OpenStreetMapのタイルレイヤーを追加
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+            }).addTo(map);
+
+            // 現在地マーカーを追加
+            if (currentMarker) {
+                map.removeLayer(currentMarker); // 既存のマーカーを削除
+            }
+            currentMarker = L.marker([latitude, longitude]).addTo(map)
+                .bindPopup('現在地だよ！')
+                .openPopup();
+
+            // マップの表示を強制的に更新（一部環境で表示されない問題対策）
+            // Leafletはコンテナのサイズが確定した後にinvalidateSizeを呼ぶ必要がある
+            // 地図タイルが読み込まれたらロード表示を隠す
+            map.on('load', () => {
+                map.invalidateSize(); // 地図のサイズを再計算
+                mapLoading.classList.add('hidden'); // ロード表示を隠す
+            });
+
+            // もしloadイベントが発火しない場合のフォールバック（稀に発生）
+            setTimeout(() => {
+                if (!mapLoading.classList.contains('hidden')) {
+                    map.invalidateSize();
+                    mapLoading.classList.add('hidden');
+                }
+            }, 3000); // 3秒後に強制的にロード表示を隠す
+        }
+
+        // 初期ロード時に現在地を取得し、マップを初期化
+        document.addEventListener('DOMContentLoaded', () => { // window.onload から変更
+            // initializeMapの呼び出しを少し遅らせる
+            setTimeout(() => {
+                // Lが定義されているかチェックを追加
+                if (typeof L === 'undefined') {
+                    console.error('Leaflet (L) is not defined. Map cannot be initialized. This might be due to a network issue or security policy blocking Leaflet CDN.');
+                    showMessageBox('ごめんね！地図の読み込みに失敗しちゃったみたい...。インターネット接続を確認して、ブラウザのキャッシュをクリアしてからもう一度試してみてね！');
+                    // Lが定義されていない場合は、地図の初期化を試みない
+                    return;
+                }
+
+                if (navigator.geolocation) {
+                    navigator.geolocation.getCurrentPosition(
+                        (position) => {
+                            const lat = position.coords.latitude;
+                            const lon = position.coords.longitude;
+                            console.log('現在地を取得したよ！ 緯度:', lat, '経度:', lon);
+                            initializeMap(lat, lon); // 現在地でマップを初期化
+                        },
+                        (error) => {
+                            console.error('現在地の取得に失敗したよ:', 'コード:', error.code, 'メッセージ:', error.message);
+                            let errorMessage = '現在地の取得に失敗したよ。許可されているか確認してね！';
+                            if (error.code === 1) {
+                                if (error.message.includes('permissions policy')) {
+                                    errorMessage = 'ごめんね！この環境では位置情報の利用がセキュリティポリシーで無効になっているみたい。通常のブラウザでは動くよ！';
+                                } else {
+                                    errorMessage = '位置情報の利用が拒否されたよ。ブラウザの設定を確認してね！';
+                                }
+                            } else if (error.code === 2) {
+                                errorMessage = '位置情報が利用できないよ。電波状況が悪いか、GPSがオフになっているかも？';
+                            } else if (error.code === 3) {
+                                errorMessage = '現在地の取得がタイムアウトしたよ。もう一度試してみてね！';
+                            }
+                            showMessageBox(errorMessage);
+                            // 現在地が取得できない場合は、東京駅周辺をデフォルトで表示
+                            initializeMap(35.681236, 139.767125); // 東京駅の緯度経度
+                        },
+                        { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+                    );
+                } else {
+                    console.warn('お使いのブラウザは位置情報に対応していません。');
+                    showMessageBox('ごめんね、お使いのブラウザは位置情報に対応していないみたい...！');
+                    // 位置情報に対応していない場合は、東京駅周辺をデフォルトで表示
+                    initializeMap(35.681236, 139.767125); // 東京駅の緯度経度
+                }
+            }, 100); // DOMContentLoaded後に少し遅延させて初期化
+        });
+
+    </script>
+</body>
+</html>
